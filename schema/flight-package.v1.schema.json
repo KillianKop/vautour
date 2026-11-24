@@ -1,0 +1,165 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:cheminee:flight-package:1",
+  "title": "Cheminee flight package, version 1",
+  "description": "Everything a navigation app needs to fly the routes computed by cheminee. Positions are in the local metric frame of the DEM (x east, y north, metres, origin at the south-west corner). Times are local decimal hours. Altitudes are metres above sea level.",
+  "type": "object",
+  "required": ["format", "version", "meta", "extent", "terrain", "dem", "lift", "polar", "takeoff", "nodes", "climb_times", "routes", "weather"],
+  "properties": {
+    "format": {"const": "cheminee.flight-package"},
+    "version": {"const": 1, "description": "Incremented on any breaking change of this contract."},
+    "meta": {
+      "type": "object",
+      "required": ["generator", "created", "day_of_year", "utc_offset", "lift_model", "attribution"],
+      "properties": {
+        "generator": {"type": "string", "description": "Producer and its version, e.g. 'cheminee 0.1.0'."},
+        "created": {"type": "string", "format": "date-time"},
+        "date": {"type": ["string", "null"], "format": "date", "description": "Flight date when known."},
+        "day_of_year": {"type": "integer", "minimum": 1, "maximum": 366},
+        "utc_offset": {"type": "number", "description": "Local time minus UTC, hours."},
+        "lift_model": {"type": "string", "description": "Name of the lift model, e.g. 'heuristic' or 'neural'."},
+        "attribution": {"type": "array", "items": {"type": "string"}, "description": "Notices that MUST be shown to users (data licences)."}
+      }
+    },
+    "extent": {
+      "type": "object",
+      "required": ["width", "height", "lon", "lat"],
+      "properties": {
+        "width": {"type": "number", "exclusiveMinimum": 0, "description": "East-west size of the map, metres."},
+        "height": {"type": "number", "exclusiveMinimum": 0, "description": "North-south size of the map, metres."},
+        "lon": {"$ref": "#/$defs/pair", "description": "Longitudes of the west and east edges, degrees."},
+        "lat": {"$ref": "#/$defs/pair", "description": "Latitudes of the south and north edges, degrees."}
+      }
+    },
+    "terrain": {
+      "type": "object",
+      "required": ["image", "px"],
+      "properties": {
+        "image": {"type": "string", "pattern": "^data:image/(jpeg|png);base64,", "description": "Map picture covering exactly the extent, north up."},
+        "px": {"$ref": "#/$defs/pair", "description": "Image size in pixels [width, height]."}
+      }
+    },
+    "dem": {
+      "type": "object",
+      "required": ["nx", "ny", "data"],
+      "properties": {
+        "nx": {"type": "integer", "minimum": 2},
+        "ny": {"type": "integer", "minimum": 2},
+        "data": {"type": "string", "description": "Base64 of nx * ny little-endian int16 altitudes, row-major, first row at the NORTH edge."}
+      }
+    },
+    "lift": {
+      "type": "object",
+      "required": ["hours", "frames"],
+      "properties": {
+        "hours": {"type": "array", "items": {"type": "number"}, "minItems": 1, "description": "Local hour of each frame."},
+        "frames": {"type": "array", "items": {"type": "string", "pattern": "^data:image/png;base64,"}, "description": "Grayscale lift index (0 = none, 255 = 1) covering the extent, north up."}
+      }
+    },
+    "polar": {
+      "type": "object",
+      "required": ["trim_kmh", "min_kmh", "max_kmh"],
+      "properties": {
+        "trim_kmh": {"type": "number"}, "min_kmh": {"type": "number"}, "max_kmh": {"type": "number"}
+      }
+    },
+    "takeoff": {"type": "integer", "minimum": 0, "description": "Index of the takeoff in nodes."},
+    "nodes": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/node"}},
+    "climb_times": {"type": "array", "items": {"type": "number"}, "minItems": 1, "description": "Local hours at which nodes[].climb is given (every 15 min)."},
+    "routes": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/route"}},
+    "weather": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/weather"}},
+    "graph": {"$ref": "#/$defs/graph"}
+  },
+  "$defs": {
+    "pair": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2},
+    "node": {
+      "type": "object",
+      "required": ["x", "y", "z", "aspect", "climb"],
+      "properties": {
+        "x": {"type": "number"}, "y": {"type": "number"},
+        "z": {"type": "number", "description": "Ground altitude."},
+        "aspect": {"enum": ["N", "NE", "E", "SE", "S", "SW", "W", "NW", "flat"], "description": "Direction the slope faces."},
+        "climb": {"type": "array", "items": {"type": "number"}, "description": "Expected climb rate (m/s, can be negative) at each of climb_times."}
+      }
+    },
+    "climb": {
+      "type": "object",
+      "required": ["type", "node", "t0", "t1", "a0", "a1", "rate"],
+      "properties": {
+        "type": {"const": "climb"},
+        "node": {"type": "integer", "minimum": 0},
+        "t0": {"type": "number"}, "t1": {"type": "number"},
+        "a0": {"type": "number"}, "a1": {"type": "number"},
+        "rate": {"type": "number", "description": "Mean climb rate, m/s."}
+      }
+    },
+    "glide": {
+      "type": "object",
+      "required": ["type", "src", "dst", "t0", "t1", "a0", "a1", "dist", "gs_kmh", "sink_ms", "airspeed_kmh", "margin_m"],
+      "properties": {
+        "type": {"const": "glide"},
+        "src": {"type": "integer", "minimum": 0}, "dst": {"type": "integer", "minimum": 0},
+        "t0": {"type": "number"}, "t1": {"type": "number"},
+        "a0": {"type": "number"}, "a1": {"type": "number"},
+        "dist": {"type": "number", "description": "Horizontal length, metres."},
+        "gs_kmh": {"type": "number", "description": "Mean ground speed."},
+        "sink_ms": {"type": "number", "description": "Mean sink rate (positive downwards)."},
+        "airspeed_kmh": {"type": "number", "description": "Speed to fly chosen by the planner."},
+        "margin_m": {"type": "number", "description": "Arrival height above the ground of dst."}
+      }
+    },
+    "route": {
+      "type": "object",
+      "required": ["kind", "label", "distance_km", "points", "t_start", "t_end", "nodes", "scoring", "turnpoints", "segments"],
+      "properties": {
+        "kind": {"enum": ["free", "triangle", "fai", "goal"]},
+        "label": {"type": "string"},
+        "distance_km": {"type": "number", "description": "Scored distance (3-turnpoint free distance or triangle perimeter)."},
+        "points": {"type": "number", "description": "distance_km x coefficient of the flight type."},
+        "t_start": {"type": "number"}, "t_end": {"type": "number"},
+        "nodes": {"type": "array", "items": {"type": "integer", "minimum": 0}, "description": "Nodes visited, in order."},
+        "scoring": {"type": "array", "items": {"type": "integer", "minimum": 0}, "description": "Scoring polyline (closed for triangles)."},
+        "turnpoints": {"type": "object", "additionalProperties": {"type": "string"}, "description": "Node index (as a string) -> label B1..B3 or P1..P3."},
+        "segments": {"type": "array", "minItems": 1, "items": {"oneOf": [{"$ref": "#/$defs/climb"}, {"$ref": "#/$defs/glide"}]}, "description": "Contiguous in time and altitude."}
+      }
+    },
+    "weather": {
+      "type": "object",
+      "required": ["t", "ceiling", "base", "wind", "wind_aloft"],
+      "properties": {
+        "t": {"type": "number"},
+        "ceiling": {"type": "number", "description": "Usable top of the climbs."},
+        "base": {"type": "number", "description": "Cloud base."},
+        "wind": {"$ref": "#/$defs/pair", "description": "[speed km/h, direction it comes from, degrees] near the ground."},
+        "wind_aloft": {"$ref": "#/$defs/pair", "description": "Same at the upper level (about 3000 m)."}
+      }
+    },
+    "graph": {
+      "type": "object",
+      "description": "Glides feasible from the ceiling, per hourly slot, for in-flight rerouting.",
+      "required": ["speeds_kmh", "circling_sink_ms", "arrival_margin_m", "clearance_m", "slots"],
+      "properties": {
+        "speeds_kmh": {"type": "array", "items": {"type": "number"}, "minItems": 1, "description": "Airspeeds of the edge columns."},
+        "circling_sink_ms": {"type": "number"},
+        "arrival_margin_m": {"type": "number"},
+        "clearance_m": {"type": "number"},
+        "slots": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["t0", "t1", "ceiling_m", "wind_kmh", "wind_dir_deg", "edges", "takeoff_edges"],
+            "properties": {
+              "t0": {"type": "number"}, "t1": {"type": "number"},
+              "ceiling_m": {"type": "number"},
+              "wind_kmh": {"type": "number"}, "wind_dir_deg": {"type": "number"},
+              "edges": {"type": "array", "items": {"type": "array", "items": {"type": "integer"}, "minItems": 4},
+                        "description": "[i, j, glide_s, loss_m] repeated for each airspeed; -1 when not feasible."},
+              "takeoff_edges": {"type": "array", "items": {"type": "array", "items": {"type": "integer"}, "minItems": 3, "maxItems": 3},
+                                "description": "[j, glide_s, loss_m] from the takeoff altitude, trim speed."}
+            }
+          }
+        }
+      }
+    }
+  }
+}
